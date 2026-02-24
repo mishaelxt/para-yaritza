@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Jean Pool → Yaritza</title>
+  <style>
+    html, body { margin:0; height:100%; background:#05040a; overflow:hidden; }
+    canvas { display:block; width:100%; height:100%; }
+
+    .hud{
+      position:fixed;
+      left:16px; top:16px;
+      padding:10px 12px;
+      border-radius:14px;
+      background:rgba(10,10,20,.35);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color:rgba(255,255,255,.92);
+      font: 12px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      letter-spacing:.2px;
+      user-select:none;
+      max-width: min(560px, calc(100vw - 32px));
+      z-index: 10;
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .hud b{ color: rgba(255,200,235,.98); font-weight: 800; }
+    .hud .small{ opacity:.85; margin-top:6px; }
+
+    .hint{
+      position:fixed; left:50%; bottom:14px; transform:translateX(-50%);
+      font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      opacity:.45; color:#fff; user-select:none;
+      z-index: 10;
+    }
+
+    .egg-btn{
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(10,10,20,.35);
+      color: rgba(255,255,255,.92);
+      font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      cursor: pointer;
+      user-select: none;
+      z-index: 20;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    }
+    .egg-btn:hover{
+      transform: translateY(-1px);
+      background: rgba(20,12,40,.48);
+      border-color: rgba(255,140,210,.35);
+    }
+    .egg-btn:active{ transform: translateY(0px) scale(.98); }
+
+    .overlay{
+      position: fixed; inset: 0;
+      display: grid; place-items: center;
+      pointer-events: none;
+      z-index: 30;
+      opacity: 0;
+      transition: opacity .22s ease;
+    }
+    .overlay.show{ opacity: 1; }
+    .card{
+      pointer-events: none;
+      padding: 18px 20px;
+      border-radius: 18px;
+      background: rgba(10,10,20,.48);
+      border: 1px solid rgba(255,255,255,.16);
+      color: rgba(255,255,255,.95);
+      font: 15px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      text-align: center;
+      box-shadow: 0 18px 60px rgba(0,0,0,.45);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      max-width: min(560px, calc(100vw - 40px));
+    }
+    .card b{ color: rgba(255,200,235,.98); font-weight: 900; }
+    .sub{ margin-top: 8px; opacity:.78; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div id="hud" class="hud">
+    <div><b>Jean Pool</b> → <b>Yaritza</b></div>
+    <div id="counter" class="small">Calculando tiempo…</div>
+    <div class="small">Click: latido más fuerte 💗 · Teclas: <b>L</b> burst · <b>H</b> HUD</div>
+  </div>
+
+  <button id="eggBtn" class="egg-btn" type="button">Toca aquí</button>
+
+  <div id="overlay" class="overlay">
+    <div class="card">
+      <div><b>Eres mi mejor decisión</b> 💗</div>
+      <div class="sub">— Jean Pool</div>
+    </div>
+  </div>
+
+  <div class="hint">💗 Para ti, mi amor</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const hud = document.getElementById("hud");
+  const counterEl = document.getElementById("counter");
+  const eggBtn = document.getElementById("eggBtn");
+  const overlay = document.getElementById("overlay");
+
+  // ====== FOTO (pon foto.jpg junto al html o cambia esta ruta) ======
+  const PHOTO_URL = "foto.jpg";
+  const photoImg = new Image();
+  photoImg.crossOrigin = "anonymous";
+  photoImg.src = PHOTO_URL;
+  let photoReady = false;
+  photoImg.onload = () => { photoReady = true; };
+  photoImg.onerror = () => { photoReady = false; };
+
+  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+  // ======= Mensajes (AJUSTADOS a solo "TE AMO") =======
+  // Exterior (fuego) — solo "TE AMO" repetido
+  const OUTER_MSG = "TE AMO  💗  TE AMO  💗  TE AMO  💗  ";
+
+  // Interior (panel LED) — solo "TE AMO" repetido (más limpio y legible)
+  const INNER_MSG = "  TE AMO  •  TE AMO  •  TE AMO  •  ";
+
+  // ======= Texto exterior (buffer para fuego) =======
+  const textCanvasOuter = document.createElement("canvas");
+  const textCtxOuter = textCanvasOuter.getContext("2d", { willReadFrequently: true });
+  let outerData=null, outerW=0, outerH=0;
+
+  function buildOuterTextBuffer(){
+    const base = canvas.width / DPR;
+    const fontPx = Math.max(52, Math.min(74, Math.floor(base * 0.045)));
+    const font = `900 ${fontPx}px ui-monospace, Menlo, Consolas, monospace`;
+    const repeated = `${OUTER_MSG}     ${OUTER_MSG}     ${OUTER_MSG}`;
+
+    textCtxOuter.font = font;
+    const metrics = textCtxOuter.measureText(repeated);
+    const padX = Math.ceil(fontPx * 0.6);
+    const padY = Math.ceil(fontPx * 0.8);
+
+    outerW = Math.ceil(metrics.width + padX*2);
+    outerH = Math.ceil(fontPx + padY*2);
+
+    textCanvasOuter.width = outerW;
+    textCanvasOuter.height = outerH;
+
+    textCtxOuter.clearRect(0,0,outerW,outerH);
+    textCtxOuter.fillStyle = "black";
+    textCtxOuter.fillRect(0,0,outerW,outerH);
+
+    textCtxOuter.font = font;
+    textCtxOuter.textBaseline = "middle";
+    textCtxOuter.textAlign = "left";
+
+    textCtxOuter.lineWidth = Math.max(2, Math.floor(fontPx * 0.045));
+    textCtxOuter.strokeStyle = "white";
+    textCtxOuter.strokeText(repeated, padX, outerH/2);
+
+    textCtxOuter.fillStyle = "white";
+    textCtxOuter.fillText(repeated, padX, outerH/2);
+
+    outerData = textCtxOuter.getImageData(0,0,outerW,outerH).data;
+  }
+
+  function pixelOn(data, W, H, x, thickness, threshold){
+    if (!data) return false;
+    const xx = ((x % W) + W) % W;
+    const cy = Math.floor(H/2);
+    for (let dy=-thickness; dy<=thickness; dy++){
+      const y = cy + dy;
+      if (y < 0 || y >= H) continue;
+      const idx = (y*W + xx) * 4;
+      if (data[idx] > threshold) return true;
+    }
+    return false;
+  }
+
+  // ======= Panel interior: MATRIZ LED =======
+  const led = {
+    cols: 128,
+    rows: 28,
+    cellPx: 6,
+    threshold: 32, // un poquito más sensible para que se vea bien "TE AMO"
+    speed: 12,     // ✅ más lento y legible
+  };
+
+  const ledCanvas = document.createElement("canvas");
+  const ledCtx = ledCanvas.getContext("2d", { willReadFrequently: true });
+  let ledData = null;
+  let ledWpx = 0, ledHpx = 0;
+
+  function buildLedCanvas(){
+    ledWpx = led.cols * led.cellPx;
+    ledHpx = led.rows * led.cellPx;
+    ledCanvas.width = ledWpx;
+    ledCanvas.height = ledHpx;
+
+    ledCtx.clearRect(0,0,ledWpx,ledHpx);
+    ledCtx.fillStyle = "black";
+    ledCtx.fillRect(0,0,ledWpx,ledHpx);
+
+    const fontPx = Math.floor(ledHpx * 0.72);
+    ledCtx.font = `900 ${fontPx}px ui-monospace, Menlo, Consolas, monospace`;
+    ledCtx.textBaseline = "middle";
+    ledCtx.textAlign = "left";
+
+    // Para que nunca se quede sin texto al hacer scroll:
+    const msg = `${INNER_MSG}    ${INNER_MSG}    ${INNER_MSG}    ${INNER_MSG}`;
+    ledCtx.fillStyle = "white";
+    ledCtx.fillText(msg, 0, ledHpx/2);
+
+    ledData = ledCtx.getImageData(0,0,ledWpx,ledHpx).data;
+  }
+
+  function ledCellOn(col, row, scrollPx){
+    // muestreo más estable: miramos 3 puntos dentro de la celda (evita cortes)
+    const baseX = col * led.cellPx + scrollPx;
+    const baseY = row * led.cellPx;
+
+    const samples = [
+      {x: baseX + Math.floor(led.cellPx*0.35), y: baseY + Math.floor(led.cellPx*0.35)},
+      {x: baseX + Math.floor(led.cellPx*0.65), y: baseY + Math.floor(led.cellPx*0.35)},
+      {x: baseX + Math.floor(led.cellPx*0.50), y: baseY + Math.floor(led.cellPx*0.65)},
+    ];
+
+    for (const s of samples){
+      const xx = ((s.x % ledWpx) + ledWpx) % ledWpx;
+      const yy = Math.max(0, Math.min(ledHpx-1, s.y));
+      const idx = (yy * ledWpx + xx) * 4;
+      if (ledData && ledData[idx] > led.threshold) return true;
+    }
+    return false;
+  }
+
+  // ======= corazón =======
+  function heartF(x, y){
+    const a = x*x + y*y - 1;
+    return a*a*a - x*x*y*y*y;
+  }
+  function insideHeart(x, y){
+    return heartF(x, y) <= 0;
+  }
+
+  function buildHeartBorder(n=1900){
+    const pts = [];
+    for (let i=0;i<n;i++){
+      const ang = -Math.PI + (2*Math.PI*i)/(n-1);
+      let lo = 0.0, hi = 1.7;
+      for (let k=0;k<28;k++){
+        const mid = (lo+hi)/2;
+        const x = Math.cos(ang)*mid;
+        const y = Math.sin(ang)*mid;
+        if (insideHeart(x, y*1.08)) lo = mid; else hi = mid;
+      }
+      const r = lo;
+      pts.push({x: Math.cos(ang)*r, y: Math.sin(ang)*r, ang});
+    }
+    return pts;
+  }
+  const border = buildHeartBorder(1900);
+
+  function drawHeartClipPath(centerX, centerY, scale){
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.scale(scale, -scale);
+    ctx.beginPath();
+    ctx.moveTo(border[0].x, border[0].y);
+    for (let i=1;i<border.length;i++) ctx.lineTo(border[i].x, border[i].y);
+    ctx.closePath();
+    ctx.restore();
+  }
+
+  // ======= contador real =======
+  const REL_START = new Date(2023, 8, 23, 0, 0, 0);
+  function formatCounter(now){
+    let y = now.getFullYear() - REL_START.getFullYear();
+    let m = now.getMonth() - REL_START.getMonth();
+    let d = now.getDate() - REL_START.getDate();
+
+    if (d < 0) {
+      const prevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+      d += prevMonth.getDate();
+      m -= 1;
+    }
+    if (m < 0) { m += 12; y -= 1; }
+
+    const anchor = new Date(REL_START.getFullYear() + y, REL_START.getMonth() + m, REL_START.getDate() + d, 0,0,0);
+    let diffMs = now - anchor;
+    if (diffMs < 0) diffMs = 0;
+
+    const totalSec = Math.floor(diffMs / 1000);
+    const hh = Math.floor(totalSec / 3600);
+    const mm = Math.floor((totalSec % 3600) / 60);
+    const ss = totalSec % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${y} años · ${m} meses · ${d} días · ${pad(hh)}:${pad(mm)}:${pad(ss)}`;
+  }
+  function updateHUD(){
+    counterEl.textContent = `Desde 23/09/2023: ${formatCounter(new Date())} ❤️`;
+  }
+  setInterval(updateHUD, 250);
+  updateHUD();
+
+  // ======= galaxia =======
+  const particles = [];
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function spawnParticle(extra=false){
+    const w = canvas.width, h = canvas.height;
+    const cx = w/2, cy = h/2;
+    const angle = rand(0, Math.PI*2);
+    const radius = extra ? rand(0, Math.min(w,h)*0.08) : rand(0, Math.min(w,h)*0.68);
+    const x = cx + Math.cos(angle)*radius + rand(-w*0.05, w*0.05);
+    const y = cy + Math.sin(angle)*radius + rand(-h*0.05, h*0.05);
+
+    const speed = extra ? rand(0.3, 2.8) : rand(0.05, 0.35);
+    const driftAng = angle + rand(-0.8, 0.8);
+    const vx = Math.cos(driftAng)*speed;
+    const vy = Math.sin(driftAng)*speed;
+
+    const size = extra ? rand(1.2, 3.4) : rand(0.6, 2.4);
+    const life = extra ? rand(50, 130) : rand(260, 680);
+
+    const hue = extra ? rand(330, 20+360) : rand(260, 360);
+    const sat = extra ? 100 : rand(75, 100);
+    const light = extra ? rand(60, 78) : rand(55, 72);
+    const alpha = extra ? rand(0.55, 0.9) : rand(0.15, 0.45);
+
+    particles.push({x,y,vx,vy,size,life,maxLife:life,hue,sat,light,alpha});
+  }
+  function drawGalaxy(){
+    const w = canvas.width, h = canvas.height;
+    const g = ctx.createRadialGradient(w*0.5,h*0.45, 0, w*0.5,h*0.55, Math.max(w,h)*0.72);
+    g.addColorStop(0, "rgba(18,10,36,0.55)");
+    g.addColorStop(0.55, "rgba(7,4,18,0.28)");
+    g.addColorStop(1, "rgba(5,4,10,0.96)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+
+    for (let i=particles.length-1; i>=0; i--){
+      const p = particles[i];
+      p.life -= 1;
+      p.x += p.vx*DPR;
+      p.y += p.vy*DPR;
+
+      if (p.life <= 0){
+        particles.splice(i,1);
+        spawnParticle(false);
+      }
+
+      const k = Math.max(0, Math.min(1, p.life / p.maxLife));
+      const a = p.alpha * (0.35 + 0.65*k);
+
+      ctx.beginPath();
+      ctx.fillStyle = `hsla(${p.hue}, ${p.sat}%, ${p.light}%, ${a})`;
+      ctx.arc(p.x, p.y, p.size*DPR, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // ======= interacción =======
+  let extraPulse = 0;
+  let ripple = [];
+  let showHUD = true;
+
+  function showEasterEgg(){
+    overlay.classList.add("show");
+    extraPulse = Math.max(extraPulse, 2.6);
+    for (let i=0;i<70;i++) spawnParticle(true);
+    setTimeout(() => overlay.classList.remove("show"), 1850);
+  }
+  eggBtn.addEventListener("click", (e) => { e.stopPropagation(); showEasterEgg(); });
+
+  addEventListener("click", (e) => {
+    extraPulse = Math.max(extraPulse, 1.8);
+    ripple.push({x: e.clientX*DPR, y: e.clientY*DPR, r: 0, a: 0.72});
+    for (let i=0;i<18;i++) spawnParticle(true);
+  });
+
+  addEventListener("keydown", (e) => {
+    const k = (e.key || "").toLowerCase();
+    if (k === "h"){
+      showHUD = !showHUD;
+      hud.style.display = showHUD ? "block" : "none";
+    }
+    if (k === "l"){
+      for (let i=0;i<110;i++) spawnParticle(true);
+      extraPulse = Math.max(extraPulse, 2.3);
+    }
+  });
+
+  function drawRipples(){
+    for (let i=ripple.length-1; i>=0; i--){
+      const r = ripple[i];
+      r.r += 10*DPR;
+      r.a *= 0.93;
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(255,120,190,${r.a})`;
+      ctx.lineWidth = 2*DPR;
+      ctx.arc(r.x, r.y, r.r, 0, Math.PI*2);
+      ctx.stroke();
+      if (r.a < 0.03) ripple.splice(i,1);
+    }
+  }
+
+  // ======= corazón palpitando =======
+  function drawHeartPulse(time, centerX, centerY, scale, alpha){
+    const t = time/1000;
+    const beat1 = 0.5 + 0.5*Math.sin(2*Math.PI*1.08*t);
+    const beat2 = 0.5 + 0.5*Math.sin(2*Math.PI*2.16*t + 1.0);
+
+    let pulse = 0.66*beat1 + 0.34*beat2 + extraPulse;
+    extraPulse *= 0.92;
+
+    const s = scale * (0.985 + 0.06*pulse);
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.globalAlpha = alpha;
+    ctx.scale(s, -s);
+
+    const step = 0.056;
+    for (let y=-1.25; y<=1.25; y+=step){
+      for (let x=-1.25; x<=1.25; x+=step){
+        const yy = y*1.08;
+        if (!insideHeart(x, yy)) continue;
+        const d = Math.hypot(x, yy);
+        const wave = 0.5 + 0.5*Math.sin(d*7 - t*6);
+        const intensity = (0.50 + 0.62*pulse) * (0.58 + 0.42*wave);
+
+        const r = Math.floor(178 + 78*intensity);
+        const g = Math.floor(8 + 52*intensity);
+        const b = Math.floor(22 + 140*intensity);
+
+        ctx.fillStyle = `rgba(${r},${g},${b},${0.09 + 0.20*intensity})`;
+        ctx.fillRect(x, yy, step*0.94, step*0.94);
+      }
+    }
+
+    ctx.globalAlpha = alpha * 0.35;
+    ctx.lineWidth = 0.025;
+    ctx.strokeStyle = "rgba(255,45,85,0.78)";
+    ctx.beginPath();
+    ctx.moveTo(border[0].x, border[0].y);
+    for (let i=1;i<border.length;i++) ctx.lineTo(border[i].x, border[i].y);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ======= foto =======
+  function drawPhotoHologram(time, centerX, centerY, scale, alpha){
+    if (!photoReady) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawHeartClipPath(centerX, centerY, scale);
+    ctx.clip();
+
+    const boxSize = scale * 2.0 * DPR * 0.96;
+    const x0 = centerX - boxSize/2;
+    const y0 = centerY - boxSize/2;
+
+    const imgW = photoImg.naturalWidth || 1;
+    const imgH = photoImg.naturalHeight || 1;
+    const imgAR = imgW / imgH;
+
+    let drawW, drawH, dx, dy;
+    if (imgAR > 1) {
+      drawH = boxSize;
+      drawW = boxSize * imgAR;
+      dx = x0 - (drawW - boxSize)/2;
+      dy = y0;
+    } else {
+      drawW = boxSize;
+      drawH = boxSize / imgAR;
+      dx = x0;
+      dy = y0 - (drawH - boxSize)/2;
+    }
+
+    ctx.globalAlpha = alpha * 0.11;
+    ctx.drawImage(photoImg, dx, dy, drawW, drawH);
+
+    ctx.globalAlpha = alpha * 0.08;
+    ctx.fillStyle = "rgba(120,255,240,0.35)";
+    ctx.fillRect(x0, y0, boxSize, boxSize);
+
+    ctx.globalAlpha = alpha * 0.06;
+    ctx.fillStyle = "rgba(255,120,220,0.28)";
+    ctx.fillRect(x0, y0, boxSize, boxSize);
+
+    ctx.restore();
+  }
+
+  // ======= exterior fuego =======
+  function drawOuterBorderFireText(time, centerX, centerY, scale, alpha){
+    const t = time / 1000;
+    const scrollPx = Math.floor(t * 110);
+    const thickness = 6;
+    const threshold = 120;
+
+    const pxPerPoint = Math.max(1, Math.floor(outerW / border.length));
+    const glowSize = 0.030;
+    const flameSteps = 5;
+    const flameLen = 0.115;
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.globalAlpha = alpha;
+    ctx.scale(scale, -scale);
+
+    for (let i = 0; i < border.length; i++){
+      const p = border[i];
+      const nL = Math.hypot(p.x, p.y) || 1;
+      const ox = p.x / nL;
+      const oy = p.y / nL;
+
+      const tx = (i * pxPerPoint) + scrollPx;
+      const on = pixelOn(outerData, outerW, outerH, tx, thickness, threshold);
+
+      if (on){
+        const flick = 0.6 + 0.4 * Math.sin(time * 0.012 + i * 0.17);
+        const heat  = 0.55 + 0.45 * Math.sin(time * 0.007 + i * 0.09);
+
+        const hue = 6 + 48 * heat;
+        const light = 52 + 18 * flick;
+
+        ctx.fillStyle = `hsla(${hue}, 100%, ${light}%, 0.98)`;
+        ctx.fillRect(p.x, p.y, glowSize, glowSize);
+
+        ctx.globalAlpha = alpha * 0.55;
+        ctx.fillStyle = `hsla(${hue}, 100%, ${Math.min(78, light + 18)}%, 0.35)`;
+        ctx.fillRect(p.x - 0.018, p.y - 0.018, glowSize + 0.056, glowSize + 0.056);
+        ctx.globalAlpha = alpha;
+
+        for (let k = 1; k <= flameSteps; k++){
+          const kk = k / flameSteps;
+          const jitter = 0.018 * Math.sin(time * 0.018 + i * 0.21 + k * 1.6);
+          const fx = p.x + ox * (flameLen * kk) + (-oy) * jitter;
+          const fy = p.y + oy * (flameLen * kk) + ( ox) * jitter;
+
+          const flameHue = Math.max(0, hue - 12 * kk);
+          const flameLight = Math.max(34, 72 - 30 * kk);
+          const flameA = 0.40 * (1 - kk) * (0.55 + 0.45 * flick);
+
+          ctx.fillStyle = `hsla(${flameHue}, 100%, ${flameLight}%, ${flameA})`;
+          const s = glowSize * (0.95 - 0.55 * kk);
+          ctx.fillRect(fx, fy, s, s);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  // ======= panel interior LED =======
+  function drawInnerLedPanel(time, centerX, centerY, scale, alpha){
+    if (!ledData) return;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawHeartClipPath(centerX, centerY, scale);
+    ctx.clip();
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.scale(scale, -scale);
+
+    const left = -1.02, right = 1.02, top = 0.42, bottom = -0.42;
+    const panelW = (right - left), panelH = (top - bottom);
+    const cellW = panelW / led.cols;
+    const cellH = panelH / led.rows;
+    const dot = Math.min(cellW, cellH) * 0.72;
+    const glow = dot * 0.85;
+
+    const t = time / 1000;
+    const scrollCols = Math.floor(t * led.speed);
+    const scrollPx = scrollCols * led.cellPx;
+
+    ctx.globalAlpha = alpha * 0.15;
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(left, bottom, panelW, panelH);
+    ctx.globalAlpha = alpha;
+
+    for (let r=0; r<led.rows; r++){
+      const y = top - (r+1)*cellH + (cellH - dot)/2;
+      for (let c=0; c<led.cols; c++){
+        const x = left + c*cellW + (cellW - dot)/2;
+
+        const hx = x + dot/2;
+        const hy = y + dot/2;
+        if (!insideHeart(hx, hy*1.08)) continue;
+
+        if (!ledCellOn(c, r, scrollPx)) continue;
+
+        const colWave = (c/led.cols);
+        const rowWave = (r/led.rows);
+        const flick = 0.65 + 0.35*Math.sin(time*0.006 + c*0.21 + r*0.37);
+
+        const hue = (360*colWave + 80*Math.sin(time*0.0007 + rowWave*5)) % 360;
+        const light = 52 + 18*flick;
+
+        ctx.fillStyle = `hsla(${hue}, 100%, ${light}%, 0.95)`;
+        ctx.fillRect(x, y, dot, dot);
+
+        ctx.globalAlpha = alpha * 0.35;
+        ctx.fillStyle = `hsla(${hue}, 100%, ${Math.min(84, light+18)}%, 0.25)`;
+        ctx.fillRect(x - glow*0.45, y - glow*0.45, dot + glow*0.9, dot + glow*0.9);
+        ctx.globalAlpha = alpha;
+      }
+    }
+
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // ======= final text =======
+  function drawFinalText(time, alpha){
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    const bob = 1 + 0.05*Math.sin(time*0.004);
+    ctx.translate(canvas.width/2, canvas.height*0.84);
+    ctx.scale(bob, bob);
+
+    const base = canvas.width / DPR;
+    const size = Math.max(28, Math.min(52, Math.floor(base * 0.040)));
+    ctx.font = `900 ${size*DPR}px ui-monospace, Menlo, Consolas, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const w = 520*DPR;
+    const gradient = ctx.createLinearGradient(-w/2,0,w/2,0);
+    const shift = (Math.sin(time*0.0012)+1)/2;
+    gradient.addColorStop(0,   "#ff2a6d");
+    gradient.addColorStop(0.28+0.12*shift, "#ffb000");
+    gradient.addColorStop(0.62, "#ff6ec7");
+    gradient.addColorStop(1,   "#7a5cff");
+
+    ctx.fillStyle = gradient;
+    ctx.fillText("TE AMO", 0, 0);
+    ctx.restore();
+  }
+
+  // ======= escenas =======
+  const startPerf = performance.now();
+  let phase = 0;
+  const CODE_DURATION = 5000;
+  const TRANSITION_DURATION = 900;
+  const SHOW_DURATION = 9000;
+
+  function clearWithTrails(alpha=0.10){
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "#05040a";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.restore();
+  }
+
+  function resize(){
+    canvas.width = Math.floor(innerWidth * DPR);
+    canvas.height = Math.floor(innerHeight * DPR);
+    buildOuterTextBuffer();
+    buildLedCanvas();
+  }
+  addEventListener("resize", resize);
+
+  function loop(time){
+    clearWithTrails(0.10);
+    drawGalaxy();
+    drawRipples();
+
+    const cx = canvas.width/2;
+    const cy = canvas.height/2;
+    const baseScale = Math.min(canvas.width, canvas.height) * 0.26;
+
+    const elapsed = time - startPerf;
+    if (elapsed < CODE_DURATION) phase = 0;
+    else if (elapsed < CODE_DURATION + TRANSITION_DURATION) phase = 1;
+    else if (elapsed < CODE_DURATION + TRANSITION_DURATION + SHOW_DURATION) phase = 2;
+    else phase = 3;
+
+    if (phase === 0){
+      drawHeartPulse(time, cx, cy, baseScale, 0.85);
+      drawPhotoHologram(time, cx, cy, baseScale, 0.55);
+      drawInnerLedPanel(time, cx, cy, baseScale, 0.92);
+      drawOuterBorderFireText(time, cx, cy, baseScale, 0.8);
+    }
+
+    if (phase === 1){
+      const p = (elapsed - CODE_DURATION) / TRANSITION_DURATION;
+      drawHeartPulse(time, cx, cy, baseScale, 0.85);
+      drawPhotoHologram(time, cx, cy, baseScale, 0.55);
+      drawInnerLedPanel(time, cx, cy, baseScale, 0.92);
+      drawOuterBorderFireText(time, cx, cy, baseScale, 1.0*p);
+    }
+
+    if (phase === 2){
+      drawHeartPulse(time, cx, cy, baseScale, 1.0);
+      drawPhotoHologram(time, cx, cy, baseScale, 0.55);
+      drawInnerLedPanel(time, cx, cy, baseScale, 0.92);
+      drawOuterBorderFireText(time, cx, cy, baseScale, 1.0);
+    }
+
+    if (phase === 3){
+      drawHeartPulse(time, cx, cy, baseScale, 1.0);
+      drawPhotoHologram(time, cx, cy, baseScale, 0.55);
+      drawInnerLedPanel(time, cx, cy, baseScale, 0.92);
+      drawOuterBorderFireText(time, cx, cy, baseScale, 1.0);
+
+      const p = Math.min(1, (elapsed - (CODE_DURATION + TRANSITION_DURATION + SHOW_DURATION)) / 1200);
+      drawFinalText(time, p);
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  // init
+  resize();
+  for (let i=0;i<240;i++) spawnParticle(false);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
